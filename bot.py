@@ -1,19 +1,19 @@
 import telebot
+import requests
 import os
-import yt_dlp
 from flask import Flask
 from threading import Thread
 
-# Token environment variable se lenge
+# Token environment variable se lena
 TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
-# Render ko zinda rakhne ke liye Flask server
+# Render server ke liye Flask
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "All-in-One Video Downloader Bot is Running!"
+    return "Video Downloader Bot is Running Successfully!"
 
 def run_server():
     port = int(os.environ.get("PORT", 8080))
@@ -25,72 +25,70 @@ def send_welcome(message):
     welcome_text = (
         "👋 **Welcome to All-in-One Video Downloader!** 🚀\n\n"
         "🔗 Mujhe kisi bhi video ka Link bhejo aur main use direct yahan download karke dunga.\n\n"
-        "**Supported:** YouTube, Twitter, Pinterest, Facebook, Reddit, etc."
+        "**Supported:** YouTube, Instagram, Twitter, Pinterest, Facebook, TikTok, etc."
     )
     bot.reply_to(message, welcome_text, parse_mode='Markdown')
 
-# Link aane par kya karna hai
+# Video Link handler
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     url = message.text
     
-    # Check karna ki message me link hai ya nahi
+    # Check karna ki text me link hai ya nahi
     if "http://" not in url and "https://" not in url:
         bot.reply_to(message, "❌ Bhai, please ek valid video ka link bhejo.")
         return
 
-    msg = bot.reply_to(message, "⏳ Video dhoondh raha hoon... thoda wait karo 🕵️‍♂️")
-    file_name = None
+    msg = bot.reply_to(message, "⏳ Processing... API se video nikal raha hoon 🕵️‍♂️")
 
     try:
-        # yt-dlp ki settings (Maximum 50MB ki file allow karega kyunki Telegram ki limit hai)
-        ydl_opts = {
-            'outtmpl': f'video_{message.message_id}.%(ext)s',
-            'format': 'best[ext=mp4]/best', # MP4 format try karega
-            'max_filesize': 50000000, # 50 MB limit
-            'quiet': True,
+        # Cobalt API use karna (Best free API for downloading)
+        api_url = "https://co.wuk.sh/api/json"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "url": url,
+            "vQuality": "720", # Video Quality
+            "filenamePattern": "classic"
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            bot.edit_message_text("⬇️ Downloading start ho gayi hai... 🚀", chat_id=message.chat.id, message_id=msg.message_id)
+        # API ko request bhejna
+        bot.edit_message_text("🔄 Bypass kar raha hoon... wait karo ⚙️", chat_id=message.chat.id, message_id=msg.message_id)
+        response = requests.post(api_url, json=payload, headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json()
             
-            # Video extract aur download karna
-            info = ydl.extract_info(url, download=True)
-            file_name = ydl.prepare_filename(info)
+            # Agar API ne direct URL diya hai
+            if 'url' in data:
+                video_url = data['url']
+                bot.edit_message_text("⬆️ Telegram par bhej raha hoon... 🌐", chat_id=message.chat.id, message_id=msg.message_id)
+                
+                # Direct URL se Telegram ko video bhejna (Fastest method)
+                bot.send_video(
+                    message.chat.id, 
+                    video_url, 
+                    caption="✅ **Video Downloaded!**\n🤖 Made with ❤️", 
+                    reply_to_message_id=message.message_id,
+                    parse_mode='Markdown'
+                )
+                bot.delete_message(message.chat.id, msg.message_id)
+            else:
+                bot.edit_message_text("❌ Video nahi mila. Shayad link private hai.", chat_id=message.chat.id, message_id=msg.message_id)
+        else:
+            bot.edit_message_text(f"❌ API Server Error: {response.status_code}", chat_id=message.chat.id, message_id=msg.message_id)
 
-        # Video upload karna
-        bot.edit_message_text("⬆️ Telegram par upload kar raha hoon... 🌐", chat_id=message.chat.id, message_id=msg.message_id)
-        
-        with open(file_name, 'rb') as video:
-            bot.send_video(
-                message.chat.id, 
-                video, 
-                caption="✅ **Video Downloaded Successfully!**\n🤖 Made with ❤️", 
-                reply_to_message_id=message.message_id,
-                parse_mode='Markdown'
-            )
-        
-        # Success ke baad purana "uploading" wala message delete kar dena
-        bot.delete_message(message.chat.id, msg.message_id)
-
-    except yt_dlp.utils.DownloadError as e:
-        bot.edit_message_text(f"❌ **Download Failed!**\nHo sakta hai link private ho ya video 50MB se badi ho.\n\nError: {str(e)[:100]}...", chat_id=message.chat.id, message_id=msg.message_id)
     except Exception as e:
-        bot.edit_message_text(f"❌ Server Error: {str(e)}", chat_id=message.chat.id, message_id=msg.message_id)
-    
-    finally:
-        # Downloaded file ko delete karna taaki server ki memory full na ho
-        if file_name and os.path.exists(file_name):
-            os.remove(file_name)
+        bot.edit_message_text(f"❌ Kuch gadbad ho gayi: {str(e)[:50]}...", chat_id=message.chat.id, message_id=msg.message_id)
 
 if __name__ == "__main__":
     if not TOKEN:
         print("ERROR: BOT_TOKEN is missing!")
     else:
-        # Background me server chalana
+        # Flask aur Bot ko ek sath chalana
         t = Thread(target=run_server)
         t.start()
-        
-        # Bot start karna
         print("Bot is running...")
         bot.infinity_polling()
