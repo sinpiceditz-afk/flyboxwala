@@ -1,6 +1,8 @@
 import telebot
 import requests
 import os
+import urllib.parse
+import re
 from flask import Flask
 from threading import Thread
 
@@ -13,7 +15,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "God Mode Video Downloader Bot is Running!"
+    return "Bot is Running smoothly!"
 
 def run_server():
     port = int(os.environ.get("PORT", 8080))
@@ -21,79 +23,97 @@ def run_server():
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    welcome_text = (
-        "👋 **Welcome to the Ultimate Video Downloader!** 🚀\n\n"
-        "🔗 Mujhe kisi bhi video ka Link bhejo (YT, Insta, FB, Pinterest, TikTok) aur magic dekho!"
-    )
-    bot.reply_to(message, welcome_text, parse_mode='Markdown')
+    bot.reply_to(message, "👋 **Welcome to the Ultimate Downloader!** 🚀\n\n🔗 Koi bhi video ka Link bhejo (YT, Insta, FB, Pinterest) aur magic dekho!")
 
-# 🔥 Smart Data Extractor (API se video link dhoondhne ka logic)
-def find_video_url(data):
-    if isinstance(data, dict):
-        # Pehle check karo agar koi direct 'video', 'url', ya 'hd' key hai
-        for key in ['video', 'url', 'hd', 'sd', 'link', 'medias']:
-            if key in data and isinstance(data[key], str) and data[key].startswith('http'):
-                return data[key]
-        # Warna deep search karo
-        for key, value in data.items():
-            res = find_video_url(value)
-            if res: return res
-    elif isinstance(data, list):
-        for item in data:
-            res = find_video_url(item)
-            if res: return res
-    elif isinstance(data, str) and data.startswith('http') and ('mp4' in data or 'video' in data):
-        return data
-    return None
+# 🔥 AI URL Cleaner & Encoder (Isi ki wajah se error aa raha tha)
+def clean_and_encode_url(url):
+    # Tracking IDs (jaise ?si= ya ?igsh=) ko remove karna taaki API confuse na ho
+    url = re.sub(r'(\?|&)(si|igsh|utm_[a-z]+)=[^&]+', '', url)
+    url = url.rstrip('?&')
+    
+    # URL ko encode karna (Safe mode)
+    encoded_url = urllib.parse.quote(url, safe='')
+    return encoded_url, url
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    url = message.text
+    text = message.text.strip()
     
-    if "http://" not in url and "https://" not in url:
+    if "http://" not in text and "https://" not in text:
         bot.reply_to(message, "❌ Bhai, please ek valid video ka link bhejo.")
         return
 
-    msg = bot.reply_to(message, "⏳ API se video extract kar raha hoon... wait 🕵️‍♂️")
+    msg = bot.reply_to(message, "⏳ Link ko clean aur analyze kar raha hoon... 🕵️‍♂️")
 
-    # 🔥 Top 3 Developer APIs (Ye Render ko block nahi karte)
-    APIS = [
-        f"https://api.joshweb.click/api/alldl?url={url}",
-        f"https://api.siputzx.my.id/api/d/allinone?url={url}",
-        f"https://api.agatz.xyz/api/alldownloader?url={url}"
-    ]
-
+    # Link ko saaf karna
+    encoded_url, clean_url = clean_and_encode_url(text)
     video_url = None
 
-    for i, api_link in enumerate(APIS):
-        try:
-            bot.edit_message_text(f"🔄 Trying Server {i+1}... ⚙️", chat_id=message.chat.id, message_id=msg.message_id)
-            
-            response = requests.get(api_link, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                extracted_link = find_video_url(data)
-                
-                if extracted_link and extracted_link.startswith("http"):
-                    video_url = extracted_link
-                    break # Link mil gaya, loop band karo
-        except Exception:
-            continue
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
 
+    try:
+        bot.edit_message_text("🔄 API 1 (Premium Server) Try kar raha hoon... ⚙️", chat_id=message.chat.id, message_id=msg.message_id)
+        
+        # 🚀 API 1: Ryzendesu (Best for YouTube & Insta)
+        res1 = requests.get(f"https://api.ryzendesu.vip/api/downloader/vdl?url={encoded_url}", headers=headers, timeout=15).json()
+        
+        # Data me se video link nikalna
+        if isinstance(res1, dict):
+            if "url" in res1 and str(res1["url"]).startswith("http"):
+                video_url = res1["url"]
+            elif "data" in res1 and isinstance(res1["data"], dict) and "url" in res1["data"]:
+                video_url = res1["data"]["url"]
+            elif "data" in res1 and isinstance(res1["data"], list) and len(res1["data"]) > 0:
+                for item in res1["data"]:
+                    if isinstance(item, dict) and (item.get("type") == "video" or item.get("extension") == "mp4"):
+                        video_url = item.get("url") or item.get("dl")
+                        break
+                if not video_url and "url" in res1["data"][0]:
+                    video_url = res1["data"][0]["url"]
+
+        # 🚀 API 2: Siputzx (Agar API 1 fail ho jaye)
+        if not video_url:
+            bot.edit_message_text("🔄 API 2 Try kar raha hoon... ⚙️", chat_id=message.chat.id, message_id=msg.message_id)
+            
+            # Link ke hisaab se API select karna
+            if "youtube.com" in clean_url or "youtu.be" in clean_url:
+                api_url = f"https://api.siputzx.my.id/api/d/ytmp4?url={encoded_url}"
+            elif "instagram.com" in clean_url:
+                api_url = f"https://api.siputzx.my.id/api/d/igdl?url={encoded_url}"
+            else:
+                api_url = f"https://api.siputzx.my.id/api/d/allinone?url={encoded_url}"
+            
+            res2 = requests.get(api_url, headers=headers, timeout=15).json()
+            if res2.get("status"):
+                data = res2.get("data")
+                if isinstance(data, dict):
+                    video_url = data.get("dl") or data.get("url")
+                elif isinstance(data, list) and len(data) > 0:
+                    video_url = data[0].get("url") or data[0].get("dl")
+
+    except Exception as e:
+        print("API Error: ", e)
+        pass
+
+    # Agar Video URL mil gaya toh bhej do
     if video_url:
         bot.edit_message_text("⬆️ Mil gaya! Telegram par upload kar raha hoon... 🌐", chat_id=message.chat.id, message_id=msg.message_id)
         try:
             bot.send_video(
                 message.chat.id, 
                 video_url, 
-                caption="✅ **Downloaded Successfully!**\n🤖 Made with ❤️", 
-                reply_to_message_id=message.message_id
+                caption=f"✅ **Video Downloaded!**\n🤖 Made with ❤️", 
+                reply_to_message_id=message.message_id,
+                parse_mode='Markdown'
             )
             bot.delete_message(message.chat.id, msg.message_id)
         except Exception as e:
-            bot.edit_message_text(f"⚠️ **Video Telegram ki limit (50MB) se bada hai!**\n\n🔗 Direct Download Link:\n{video_url}", chat_id=message.chat.id, message_id=msg.message_id)
+            bot.edit_message_text(f"⚠️ **Video Telegram ki limit (50MB) se bada hai!**\n\n🔗 Aap is link se direct download kar sakte ho:\n{video_url}", chat_id=message.chat.id, message_id=msg.message_id)
     else:
-        bot.edit_message_text("❌ Download Failed. Ya toh link private hai, ya servers change ho gaye hain.", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("❌ Download Failed. Ya toh link private hai, ya server busy hai.", chat_id=message.chat.id, message_id=msg.message_id)
+
 
 if __name__ == "__main__":
     if not TOKEN:
